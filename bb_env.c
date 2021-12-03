@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <gnutls/crypto.h>
 #include <libgen.h>
 #include <mtd/mtd-user.h>
 #include <stdbool.h>
@@ -36,34 +37,52 @@ struct config {
 } __attribute__((packed));
 
 struct config_block {
-    struct config cfg;
-    char padding[CONFIG_BLOCK_SIZE - sizeof(struct config) - 128/8 /* md5 */];
-    char md5[128/8];
+    union {
+        struct config cfg;
+        char data[CONFIG_BLOCK_SIZE - 128/8 /* md5 hash */];
+    };
+    char hash[128/8];
 } __attribute__((packed));
 
 int read_config_block(struct config_block *blk)
 {
+    char hash[sizeof(blk->hash)];
+    ssize_t bytes_read;
     int rv = 0;
     int fd = open("/dev/mtd0ro", O_RDONLY);
-	if (fd < 0) {
+    if (fd < 0) {
         rv = errno;
-		perror("open");
-		return rv;
-	}
+        perror("open");
+        goto out;
+    }
 
-	if (lseek(fd, CONFIG_BLOCK_OFFSET, SEEK_SET) < 0) {
+    if (lseek(fd, CONFIG_BLOCK_OFFSET, SEEK_SET) < 0) {
         rv = errno;
         perror("lseek");
+        close(fd);
         goto out;
     }
 
-    if (read(fd, blk, sizeof(*blk)) < 0) {
-        rv = errno;
-        perror("read");
+    bytes_read = read(fd, blk, sizeof(*blk));
+    close(fd);
+    if (bytes_read != sizeof(*blk)) {
+        rv = bytes_read < 0 ? errno : -EIO;
         goto out;
     }
+
+    rv = gnutls_hash_fast(GNUTLS_DIG_MD5, blk->data, sizeof(blk->data), hash);
+    if (rv < 0) {
+        fprintf(stderr, "## Error: failed to calculate hash\n");
+        goto out;
+    }
+
+    if (memcmp(blk->hash, hash, sizeof(hash))) {
+        fprintf(stderr, "## Error: hash mismatch\n");
+        rv = -1;
+        goto out;
+    }
+
 out:
-    close(fd);
     return rv;
 }
 
