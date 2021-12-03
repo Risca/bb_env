@@ -1,0 +1,5 @@
+bb_env
+\.*swp
+*\.img
+*_printenv
+*_setenv
