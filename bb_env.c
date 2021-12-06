@@ -86,12 +86,25 @@ static int set_u32(uint32_t* value, const char* str)
     return 0;
 }
 
-static int read_config_block(struct config_block *blk)
+static int read_config_block(struct config_block **config)
 {
+    struct config_block *blk = NULL;
     char hash[sizeof(blk->hash)];
     ssize_t bytes_read;
     int rv = 0;
-    int fd = open("/dev/mtd0ro", O_RDONLY);
+    int fd;
+
+    if (config == NULL) {
+        return -EINVAL;
+    }
+
+    blk = malloc(sizeof(struct config_block));
+    if (!blk) {
+        perror("malloc");
+        return -ENOMEM;
+    }
+
+    fd = open("/dev/mtd0ro", O_RDONLY);
     if (fd < 0) {
         rv = errno;
         perror("open");
@@ -125,6 +138,13 @@ static int read_config_block(struct config_block *blk)
     }
 
 out:
+    if (rv) {
+        free(blk);
+        *config = NULL;
+    }
+    else {
+        *config = blk;
+    }
     return rv;
 }
 
@@ -323,12 +343,7 @@ static int bb_printenv(const char* exe, int argc, char *argv[])
         }
     }
 
-    blk = malloc(sizeof(struct config_block));
-    if (!blk) {
-        perror("malloc");
-        return -ENOMEM;
-    }
-    c = read_config_block(blk);
+    c = read_config_block(&blk);
     if (c == 0) {
         if (optind == argc) {
             c = print_config(&blk->cfg, 0, ARRAY_SIZE(config_strings), config_strings, header);
@@ -336,8 +351,8 @@ static int bb_printenv(const char* exe, int argc, char *argv[])
         else {
             c = print_config(&blk->cfg, optind, argc, (const char**)argv, header);
         }
+        free(blk);
     }
-    free(blk);
     return c;
 }
 
@@ -414,13 +429,7 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
 
     printf("%s=%s\n", variable, value);
 
-    blk = malloc(sizeof(struct config_block));
-    if (!blk) {
-        perror("malloc");
-        free(value);
-        return -ENOMEM;
-    }
-    c = read_config_block(blk);
+    c = read_config_block(&blk);
     if (c == 0) {
         struct config *cfg = &blk->cfg;
 
@@ -476,8 +485,8 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
         if (c == 0) {
             c = write_config_block(blk);
         }
+        free(blk);
     }
-    free(blk);
     free(value);
     return c;
 }
