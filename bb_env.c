@@ -217,6 +217,8 @@ static const char * config_strings[] = {
     "mender_boot_part", // same as "boot_part"
     "mender_boot_part_hex", // same as "boot_part"
 };
+static int num_v1_config_strings = 9;
+static int num_v2_config_strings = ARRAY_SIZE(config_strings);
 
 static bool valid_config_variable(const char* variable)
 {
@@ -342,7 +344,7 @@ static int bb_printenv(const char* exe, int argc, char *argv[])
     c = read_config_block(&blk);
     if (c == 0) {
         if (optind == argc) {
-            c = print_config(&blk->cfg, 0, ARRAY_SIZE(config_strings), config_strings, header);
+            c = print_config(&blk->cfg, 0, blk->cfg.version == 1 ? num_v1_config_strings : num_v2_config_strings, config_strings, header);
         }
         else {
             c = print_config(&blk->cfg, optind, argc, (const char**)argv, header);
@@ -392,10 +394,13 @@ static int set_variable(struct config *cfg, const char* variable, const char* va
     else if (!strcmp("button", variable)) {
         rv = set_u8(&cfg->button, value);
     }
-    else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
+    else if (cfg->version >= 2 && (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable))) {
         rv = set_u8(&cfg->upgrade_available, value);
     }
-    else if (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable)) {
+    else if (cfg->version >= 2 && (!strcmp("bootcount", variable))) {
+        rv = set_u8(&cfg->boot_count, value);
+    }
+    else if (cfg->version >= 2 && (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable))) {
         rv = set_u8(&cfg->boot_part, value);
     }
     else {
