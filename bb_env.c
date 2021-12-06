@@ -356,7 +356,62 @@ static int bb_printenv(const char* exe, int argc, char *argv[])
     return c;
 }
 
-// TODO: support the -s flag (from file and stdin!)
+static int set_variable(struct config *cfg, const char* variable, const char* value)
+{
+    int rv = 0;
+
+    if (!strcmp("version", variable)) {
+        // Nope
+    }
+    else if (!strcmp("bootsource", variable)) {
+        rv = set_u8(&cfg->boot_source, value);
+    }
+    else if (!strcmp("console", variable)) {
+        rv = set_u8(&cfg->console, value);
+    }
+    else if (!strcmp("nic", variable)) {
+        rv = set_u8(&cfg->nic, value);
+    }
+    else if (!strcmp("boottype", variable)) {
+        rv = set_u8(&cfg->boot_type, value);
+    }
+    else if (!strcmp("loadaddress", variable)) {
+        uint32_t v; // use temp variable to avoid unaligned access
+        rv = set_u32(&v, value);
+        if (rv == 0) {
+            cfg->load_address = v;
+        }
+    }
+    else if (!strcmp("cmndline", variable)) {
+        int len = snprintf(cfg->cmdline, sizeof(cfg->cmdline), "%s", value);
+        rv = (len < sizeof(cfg->cmdline)) ? 0 : -1;
+    }
+    else if (!strcmp("kernelmax", variable)) {
+        uint16_t v; // use temp variable to avoid unaligned access
+        rv = set_u16(&v, value);
+        if (rv == 0) {
+            cfg->kernel_max = v;
+        }
+    }
+    else if (!strcmp("button", variable)) {
+        rv = set_u8(&cfg->button, value);
+    }
+    else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
+        rv = set_u8(&cfg->upgrade_available, value);
+    }
+    else if (!strcmp("bootcount", variable) || !strcmp("bootcnt", variable)) {
+        rv = set_u8(&cfg->boot_count, value);
+    }
+    else if (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable)) {
+        rv = set_u8(&cfg->boot_part, value);
+    }
+    else {
+        // silently ignore
+    }
+
+    return 0;
+}
+
 static int bb_setenv(const char* exe, int argc, char *argv[])
 {
     static const char * setenv_usage =
@@ -366,20 +421,25 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
         " -h, --help           print this help.\n"
         "\n";
     static struct option setenv_options[] = {
-        {"help",     no_argument, 0, 'h'},
-        {0,          0,           0,  0 },
+        {"help",     no_argument,       0, 'h'},
+        {"script",   required_argument, 0, 's'},
+        {0,          0,                 0,  0 },
     };
     int c;
     const char* variable;
-    char* value;
+    char* value = NULL;
     size_t size;
     struct config_block *blk;
+    const char* script_file = NULL;
     
-    while ((c = getopt_long(argc, argv, "h", setenv_options, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "hs:", setenv_options, NULL)) != -1) {
         switch (c) {
         case 'h':
             printf(setenv_usage, exe);
             return 0;
+        case 's':
+            script_file = optarg;
+            break;
         case '?':
         default:
             printf(setenv_usage, exe);
@@ -387,107 +447,114 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
         };
     }
 
-    if (argc <= optind) {
-        fprintf(stderr, "## Error: variable name missing\n");
-        return -1;
-    }
+    if (script_file) {
+        FILE *fp;
+        char *line = NULL;
+        size_t len = 0;
 
-    if (argc == (optind+1)) {
-        // only 1 argument means clear that variable, which we don't support.
-        return 0;
-    }
-
-    variable = argv[optind];
-    if (!valid_config_variable(variable)) {
-        // "ok"
-        return 0;
-    }
-
-    // This has horrible performance
-    size = 0;
-    for (int i = optind+1; i < argc; ++i) {
-        size += strlen(argv[i]) + 1; // +1 for either ' ' or '\0'
-    }
-
-    value = malloc(size);
-    if (!value) {
-        perror("malloc");
-        return -ENOMEM;
-    }
-
-    // Ugh...
-    value[0] = '\0';
-    strcat(value, argv[optind+1]);
-    for (int i = optind+2; i < argc; ++i) {
-        strcat(value, " ");
-        strcat(value, argv[i]);
-    }
-    if (value[0] == '\0') {
-        free(value);
-        return 0;
-    }
-
-    printf("%s=%s\n", variable, value);
-
-    c = read_config_block(&blk);
-    if (c == 0) {
-        struct config *cfg = &blk->cfg;
-
-        if (!strcmp("version", variable)) {
-            // Nope
-        }
-        else if (!strcmp("bootsource", variable)) {
-            c = set_u8(&cfg->boot_source, value);
-        }
-        else if (!strcmp("console", variable)) {
-            c = set_u8(&cfg->console, value);
-        }
-        else if (!strcmp("nic", variable)) {
-            c = set_u8(&cfg->nic, value);
-        }
-        else if (!strcmp("boottype", variable)) {
-            c = set_u8(&cfg->boot_type, value);
-        }
-        else if (!strcmp("loadaddress", variable)) {
-            uint32_t v; // use temp variable to avoid unaligned access
-            c = set_u32(&v, value);
-            if (c == 0) {
-                cfg->load_address = v;
-            }
-        }
-        else if (!strcmp("cmndline", variable)) {
-            int len = snprintf(cfg->cmdline, sizeof(cfg->cmdline), "%s", value);
-            c = (len < sizeof(cfg->cmdline)) ? 0 : -1;
-        }
-        else if (!strcmp("kernelmax", variable)) {
-            uint16_t v; // use temp variable to avoid unaligned access
-            c = set_u16(&v, value);
-            if (c == 0) {
-                cfg->kernel_max = v;
-            }
-        }
-        else if (!strcmp("button", variable)) {
-            c = set_u8(&cfg->button, value);
-        }
-        else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
-            c = set_u8(&cfg->upgrade_available, value);
-        }
-        else if (!strcmp("bootcount", variable) || !strcmp("bootcnt", variable)) {
-            c = set_u8(&cfg->boot_count, value);
-        }
-        else if (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable)) {
-            c = set_u8(&cfg->boot_part, value);
+        printf("Reading from %s\n", script_file);
+        if (strcmp("-", script_file) == 0) {
+            fp = stdin;
         }
         else {
-            // silently ignore
+            fp = fopen(script_file, "r");
+            if (!fp) {
+                c = errno;
+                perror("fopen");
+                return c;
+            }
         }
 
+        c = read_config_block(&blk);
         if (c == 0) {
-            c = write_config_block(blk);
+            while (!c && getline(&line, &len, fp) != -1) {
+                const char* variable;
+                const char* value;
+                int rv;
+
+                variable = strtok(line, "=");
+                if (!variable) {
+                    // It's either a comment or a variable to clear, so it's ok
+                    goto next;
+                }
+                if (variable[0] == '#') {
+                    goto next;
+                }
+
+                value = strtok(NULL, "\n");
+                if (!value) {
+                    // "clear" variable
+                    goto next;
+                }
+                printf("\"%s\" = \"%s\"\n", variable, value);
+                c = set_variable(&blk->cfg, variable, value);
+            next:
+                free(line);
+                line = NULL;
+                len = 0;
+            }
+            if (c == 0) {
+                c = write_config_block(blk);
+            }
+            free(blk);
         }
-        free(blk);
+        if (fp != stdin) {
+            fclose(fp);
+        }
     }
-    free(value);
+    else {
+        if (argc <= optind) {
+            fprintf(stderr, "## Error: variable name missing\n");
+            return -1;
+        }
+
+        if (argc == (optind+1)) {
+            // only 1 argument means clear that variable, which we don't support.
+            return 0;
+        }
+
+        variable = argv[optind];
+        if (!valid_config_variable(variable)) {
+            // "ok"
+            return 0;
+        }
+
+        // This has horrible performance
+        size = 0;
+        for (int i = optind+1; i < argc; ++i) {
+            size += strlen(argv[i]) + 1; // +1 for either ' ' or '\0'
+        }
+
+        value = malloc(size);
+        if (!value) {
+            perror("malloc");
+            return -ENOMEM;
+        }
+
+        // Ugh...
+        value[0] = '\0';
+        strcat(value, argv[optind+1]);
+        for (int i = optind+2; i < argc; ++i) {
+            strcat(value, " ");
+            strcat(value, argv[i]);
+        }
+        if (value[0] == '\0') {
+            free(value);
+            return 0;
+        }
+
+        printf("%s=%s\n", variable, value);
+        c = read_config_block(&blk);
+        if (c == 0) {
+            c = set_variable(&blk->cfg, variable, value);
+            if (c == 0) {
+                c = write_config_block(blk);
+            }
+            free(blk);
+        }
+        free(value);
+    }
+
     return c;
 }
 
