@@ -99,7 +99,10 @@ static const char * config_strings[] = {
     "upgrade",
     "upgrade_available", // same as "upgrade"
     "bootcount",
+    "bootcnt", // same as "bootcount"
     "boot_part",
+    "mender_boot_part", // same as "boot_part"
+    "mender_boot_part_hex", // same as "boot_part"
 };
 
 static bool valid_config_variable(const char* variable)
@@ -163,8 +166,17 @@ static int print_config(const struct config * const cfg, const int start, const 
         else if (cfg->version >= 2 && !compare_and_print_header("bootcount", variable, header)) {
             printf("%d\n", cfg->boot_count);
         }
+        else if (cfg->version >= 2 && !compare_and_print_header("bootcnt", variable, header)) {
+            printf("%d\n", cfg->boot_count);
+        }
         else if (cfg->version >= 2 && !compare_and_print_header("boot_part", variable, header)) {
             printf("%d\n", cfg->boot_part);
+        }
+        else if (cfg->version >= 2 && !compare_and_print_header("mender_boot_part", variable, header)) {
+            printf("%d\n", cfg->boot_part);
+        }
+        else if (cfg->version >= 2 && !compare_and_print_header("mender_boot_part_hex", variable, header)) {
+            printf("%x\n", cfg->boot_part);
         }
         else {
             fprintf(stderr, "## Error: \"%s\" not defined\n", variable);
