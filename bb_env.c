@@ -213,7 +213,6 @@ static const char * config_strings[] = {
     "upgrade",
     "upgrade_available", // same as "upgrade"
     "bootcount",
-    "bootcnt", // same as "bootcount"
     "boot_part",
     "mender_boot_part", // same as "boot_part"
     "mender_boot_part_hex", // same as "boot_part"
@@ -278,9 +277,6 @@ static int print_config(const struct config * const cfg, const int start, const 
             printf("%d\n", cfg->upgrade_available);
         }
         else if (cfg->version >= 2 && !compare_and_print_header("bootcount", variable, header)) {
-            printf("%d\n", cfg->boot_count);
-        }
-        else if (cfg->version >= 2 && !compare_and_print_header("bootcnt", variable, header)) {
             printf("%d\n", cfg->boot_count);
         }
         else if (cfg->version >= 2 && !compare_and_print_header("boot_part", variable, header)) {
@@ -398,9 +394,6 @@ static int set_variable(struct config *cfg, const char* variable, const char* va
     }
     else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
         rv = set_u8(&cfg->upgrade_available, value);
-    }
-    else if (!strcmp("bootcount", variable) || !strcmp("bootcnt", variable)) {
-        rv = set_u8(&cfg->boot_count, value);
     }
     else if (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable)) {
         rv = set_u8(&cfg->boot_part, value);
