@@ -44,7 +44,7 @@ struct config_block {
     char hash[128/8];
 } __attribute__((packed));
 
-int read_config_block(struct config_block *blk)
+static int read_config_block(struct config_block *blk)
 {
     char hash[sizeof(blk->hash)];
     ssize_t bytes_read;
@@ -102,7 +102,7 @@ static const char * config_strings[] = {
     "boot_part",
 };
 
-bool valid_config_variable(const char* variable)
+static bool valid_config_variable(const char* variable)
 {
     for (int i = 0; i < ARRAY_SIZE(config_strings); ++i) {
         if (!strcmp(variable, config_strings[i])) {
@@ -113,7 +113,7 @@ bool valid_config_variable(const char* variable)
     return false;
 }
 
-int compare_and_print_header(const char* key, const char* variable, bool header)
+static int compare_and_print_header(const char* key, const char* variable, bool header)
 {
     int rv = strcmp(variable, key);
     if (!rv && header) {
@@ -122,7 +122,7 @@ int compare_and_print_header(const char* key, const char* variable, bool header)
     return rv;
 }
 
-int print_config(const struct config * const cfg, const int start, const int end, const char *variables[], const bool header)
+static int print_config(const struct config * const cfg, const int start, const int end, const char *variables[], const bool header)
 {
     int rv = 0;
     for (int i = start; i < end; ++i) {
@@ -174,7 +174,7 @@ int print_config(const struct config * const cfg, const int start, const int end
     return rv;
 }
 
-int bb_printenv(const char* exe, int argc, char *argv[])
+static int bb_printenv(const char* exe, int argc, char *argv[])
 {
     static const char * printenv_usage =
         "Usage: %s [OPTIONS]... [VARIABLE]...\n"
@@ -235,7 +235,7 @@ int bb_printenv(const char* exe, int argc, char *argv[])
     return c;
 }
 
-int bb_setenv(const char* exe, int argc, char *argv[])
+static int bb_setenv(const char* exe, int argc, char *argv[])
 {
     static const char * setenv_usage =
         "Usage: %s [OPTIONS]... [VARIABLE]...\n"
@@ -300,7 +300,7 @@ int bb_setenv(const char* exe, int argc, char *argv[])
 }
 
 // POSIX basename might alter path, so work with copies
-const char * get_executable_name(const char * argv0)
+static const char * get_executable_name(const char * argv0)
 {
     char * path = strdup(argv0);
     char * exe = strdup(basename(path));
