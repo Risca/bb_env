@@ -44,6 +44,48 @@ struct config_block {
     char hash[128/8];
 } __attribute__((packed));
 
+static int set_u8(uint8_t* value, const char* str)
+{
+    long v;
+
+    errno = 0;
+    v = strtol(str, NULL, 0);
+    if (errno != 0 || v < 0 || v > 0xFF) {
+        return -1;
+    }
+
+    *value = v & 0xff;
+    return 0;
+}
+
+static int set_u16(uint16_t* value, const char* str)
+{
+    long v;
+
+    errno = 0;
+    v = strtol(str, NULL, 0);
+    if (errno != 0 || v < 0 || v > 0xffff) {
+        return -1;
+    }
+
+    *value = v & 0xffff;
+    return 0;
+}
+
+static int set_u32(uint32_t* value, const char* str)
+{
+    long long v;
+
+    errno = 0;
+    v = strtoll(str, NULL, 0);
+    if (errno != 0 || v < 0 || v > 0xffffffff) {
+        return -1;
+    }
+
+    *value = v & 0xffffffff;
+    return 0;
+}
+
 static int read_config_block(struct config_block *blk)
 {
     char hash[sizeof(blk->hash)];
@@ -83,6 +125,58 @@ static int read_config_block(struct config_block *blk)
     }
 
 out:
+    return rv;
+}
+
+static int write_config_block(struct config_block *blk)
+{
+    char hash[sizeof(blk->hash)];
+    int rv = 0;
+    int fd;
+    size_t bytes_written;
+
+    rv = gnutls_hash_fast(GNUTLS_DIG_MD5, blk->data, sizeof(blk->data), hash);
+    if (rv < 0) {
+        fprintf(stderr, "## Error: failed to calculate hash\n");
+        return rv;
+    }
+
+    if (0 == memcmp(blk->hash, hash, sizeof(hash))) {
+        // Nothing's changed
+        return 0;
+    }
+
+    memcpy(blk->hash, hash, sizeof(hash));
+
+    fd = open("/dev/mtd0", O_WRONLY);
+    if (fd < 0) {
+        rv = errno;
+        perror("open");
+        return rv;
+    }
+
+    if (lseek(fd, CONFIG_BLOCK_OFFSET, SEEK_SET) < 0) {
+        rv = errno;
+        perror("lseek");
+        goto out;
+    }
+
+    // TODO: rewrite for proper flash handling
+    bytes_written = 0;
+    while (bytes_written < CONFIG_BLOCK_SIZE) {
+        ssize_t len = write(fd, (uint8_t*)blk + bytes_written, CONFIG_BLOCK_SIZE - bytes_written);
+        if (len < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            rv = errno;
+            goto out;
+        }
+        bytes_written += len;
+    }
+
+out:
+    close(fd);
     return rv;
 }
 
@@ -247,6 +341,7 @@ static int bb_printenv(const char* exe, int argc, char *argv[])
     return c;
 }
 
+// TODO: support the -s flag (from file and stdin!)
 static int bb_setenv(const char* exe, int argc, char *argv[])
 {
     static const char * setenv_usage =
@@ -261,6 +356,9 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
     };
     int c;
     const char* variable;
+    char* value;
+    size_t size;
+    struct config_block *blk;
     
     while ((c = getopt_long(argc, argv, "h", setenv_options, NULL)) != -1) {
         switch (c) {
@@ -279,36 +377,109 @@ static int bb_setenv(const char* exe, int argc, char *argv[])
         return -1;
     }
 
-    variable = argv[optind];
+    if (argc == (optind+1)) {
+        // only 1 argument means clear that variable, which we don't support.
+        return 0;
+    }
 
-    if (!strcmp("version", variable)) {
+    variable = argv[optind];
+    if (!valid_config_variable(variable)) {
+        // "ok"
+        return 0;
     }
-    else if (!strcmp("bootsource", variable)) {
+
+    // This has horrible performance
+    size = 0;
+    for (int i = optind+1; i < argc; ++i) {
+        size += strlen(argv[i]) + 1; // +1 for either ' ' or '\0'
     }
-    else if (!strcmp("console", variable)) {
+
+    value = malloc(size);
+    if (!value) {
+        perror("malloc");
+        return -ENOMEM;
     }
-    else if (!strcmp("nic", variable)) {
+
+    // Ugh...
+    value[0] = '\0';
+    strcat(value, argv[optind+1]);
+    for (int i = optind+2; i < argc; ++i) {
+        strcat(value, " ");
+        strcat(value, argv[i]);
     }
-    else if (!strcmp("boottype", variable)) {
+    if (value[0] == '\0') {
+        free(value);
+        return 0;
     }
-    else if (!strcmp("loadaddress", variable)) {
+
+    printf("%s=%s\n", variable, value);
+
+    blk = malloc(sizeof(struct config_block));
+    if (!blk) {
+        perror("malloc");
+        free(value);
+        return -ENOMEM;
     }
-    else if (!strcmp("cmndline", variable)) {
+    c = read_config_block(blk);
+    if (c == 0) {
+        struct config *cfg = &blk->cfg;
+
+        if (!strcmp("version", variable)) {
+            // Nope
+        }
+        else if (!strcmp("bootsource", variable)) {
+            c = set_u8(&cfg->boot_source, value);
+        }
+        else if (!strcmp("console", variable)) {
+            c = set_u8(&cfg->console, value);
+        }
+        else if (!strcmp("nic", variable)) {
+            c = set_u8(&cfg->nic, value);
+        }
+        else if (!strcmp("boottype", variable)) {
+            c = set_u8(&cfg->boot_type, value);
+        }
+        else if (!strcmp("loadaddress", variable)) {
+            uint32_t v; // use temp variable to avoid unaligned access
+            c = set_u32(&v, value);
+            if (c == 0) {
+                cfg->load_address = v;
+            }
+        }
+        else if (!strcmp("cmndline", variable)) {
+            int len = snprintf(cfg->cmdline, sizeof(cfg->cmdline), "%s", value);
+            c = (len < sizeof(cfg->cmdline)) ? 0 : -1;
+        }
+        else if (!strcmp("kernelmax", variable)) {
+            uint16_t v; // use temp variable to avoid unaligned access
+            c = set_u16(&v, value);
+            if (c == 0) {
+                cfg->kernel_max = v;
+            }
+        }
+        else if (!strcmp("button", variable)) {
+            c = set_u8(&cfg->button, value);
+        }
+        else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
+            c = set_u8(&cfg->upgrade_available, value);
+        }
+        else if (!strcmp("bootcount", variable) || !strcmp("bootcnt", variable)) {
+            c = set_u8(&cfg->boot_count, value);
+        }
+        else if (!strcmp("boot_part", variable) || !strcmp("mender_boot_part", variable) || !strcmp("mender_boot_part_hex", variable)) {
+            c = set_u8(&cfg->boot_part, value);
+        }
+        else {
+            // silently ignore
+        }
+
+        if (c == 0) {
+            c = write_config_block(blk);
+        }
     }
-    else if (!strcmp("kernelmax", variable)) {
-    }
-    else if (!strcmp("button", variable)) {
-    }
-    else if (!strcmp("upgrade", variable) || !strcmp("upgrade_available", variable)) {
-    }
-    else if (!strcmp("bootcount", variable)) {
-    }
-    else if (!strcmp("boot_part", variable)) {
-    }
-    else {
-        // silently ignore
-    }
-    return 0;
+    free(blk);
+    free(value);
+    return c;
 }
 
 // POSIX basename might alter path, so work with copies
