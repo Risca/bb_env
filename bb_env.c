@@ -168,7 +168,7 @@ static int write_config_block(struct config_block *blk)
 
     memcpy(blk->hash, hash, sizeof(hash));
 
-    fd = open("/dev/mtd0", O_WRONLY);
+    fd = open("/dev/mtdblock0", O_WRONLY);
     if (fd < 0) {
         rv = errno;
         perror("open");
